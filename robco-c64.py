@@ -33,6 +33,7 @@ ANSI_RESET = '\x1b[0m'
 
 def get_robco_splash():
     """Restituisce il splash screen con logo RobCo compatto."""
+# C64 compliant ASCII Logo    
     return (
         f"\r\n"
         f"{ANSI_CYAN}{ANSI_BOLD}"
@@ -361,4 +362,5 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"An unexpected error occurred in the server: {e}")
         import traceback
+
         traceback.print_exc()
