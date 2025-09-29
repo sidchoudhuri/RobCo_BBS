@@ -1,20 +1,3 @@
-That's a classic matching game structure\! To make the Telnet output (currently using indices 00-15 and single-character symbols) look like the console version (using coordinates `row col`, `XX` for hidden, and 2-character symbols), I need to replace the entire `run_matching_game` and related utilities.
-
-Here is the revised `run_matching_game` function and the new helper utilities, fully integrating the look and feel of your provided console code, including 2-character symbols, `XX` display, coordinate input, and the move counter.
-
-### Key Changes
-
-1.  **New Symbol Set:** Using `['C=', '64', '8B', 'm0', 'F1', 'F3', 'F5', 'F7']`.
-2.  **`create_board_c64`:** Replaces `get_matching_game_board` to generate the 4x4 grid of 2-char symbols.
-3.  **`draw_matching_board_c64`:** Replaces `draw_matching_board` to display the board using the `row col` format and `XX` for hidden tiles.
-4.  **`safe_read_coords`:** A new function to handle coordinate input (`row col`) over Telnet, similar to your `get_player_move`.
-5.  **`run_matching_game`:** Modified to implement the turn-based logic, including displaying the move counter and the "No match. Press Enter" pause.
-
------
-
-### Revised Python Code with C64 Matching Game
-
-```python
 #do a "pip install telnetlib3" if telnetlib3 is not installed
 #RobCo BBS server for the RobCo terminal hacking game
 #By Francesco Clementoni aka Arturo Dente
@@ -514,4 +497,3 @@ if __name__ == '__main__':
         print(f"An unexpected error occurred in the server: {e}")
         import traceback
         traceback.print_exc()
-```
