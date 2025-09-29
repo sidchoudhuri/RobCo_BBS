@@ -410,7 +410,7 @@ async def handle_telnet(reader, writer):
                 )
                 
                 # --- LAUNCH MATCHING GAME ---
-                await safe_write(writer, reader, "\n\r{ANSI_CYAN}Secondary System Detected... Launching C64 Match Mini-Game!{ANSI_RESET}\n\r")
+                await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Secondary System Detected... Launching C64 Match Mini-Game!{ANSI_RESET}\n\r")
                 await asyncio.sleep(2)
                 
                 await run_matching_game(reader, writer)
