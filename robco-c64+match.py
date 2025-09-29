@@ -84,7 +84,7 @@ async def safe_readline(reader, writer):
 async def safe_read_coords(reader, writer, board_size, message):
     """Legge e valida le coordinate riga colonna (e.g., '0 1')"""
     while is_connection_alive(writer, reader):
-        if not await safe_write(writer, reader, f"\n\r{message} (row col, e.g., 0 1): "): return None
+        if not await safe_write(writer, reader, f"\n\r{message} \n\r(row col, e.g., 0 1): "): return None
         
         position = await safe_readline(reader, writer)
         if position is None: return None
@@ -111,7 +111,7 @@ def get_robco_splash():
     """Restituisce il splash screen con logo RobCo compatto."""
     return (
         f"\r\n"
-        f"{ANSI_CYAN}{ANSI_BOLD}"
+        f"{ANSI_RESET}{ANSI_CYAN}{ANSI_BOLD}"
         f"\r\n######|       ##|       #####|"
         f"\r\n##|--##| #####| ##|     ##|---  #####|"
         f"\r\n######| ##|--##|######| ##|   ##|--##|"
@@ -246,10 +246,10 @@ async def run_matching_game(reader, writer):
         for cell in row:
             all_symbols.add(cell['symbol'])
 
-    if not await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Symbols to match: {ANSI_RESET}"): return
+    if not await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Symbols to match:\n\r {ANSI_RESET}"): return
     if not await safe_write(writer, reader, " ".join(sorted(list(all_symbols))) + "\n\r"): return
     if not await safe_write(writer, reader, "-" * 30 + "\n\r"): return
-    if not await safe_write(writer, reader, f"Press any key to start the game and hide the symbols...{ANSI_RESET}"): return
+    if not await safe_write(writer, reader, f"Press any key to start the game and \n\rhide the symbols...{ANSI_RESET}"): return
     
     await reader.read(1) # Wait for input
     # --- End Setup ---
@@ -299,7 +299,7 @@ async def run_matching_game(reader, writer):
             matched_pairs += 1
             await asyncio.sleep(1)
         else:
-            if not await safe_write(writer, reader, f"{ANSI_YELLOW}No match. Take a moment to remember their positions!{ANSI_RESET}\n\r"): return
+            if not await safe_write(writer, reader, f"{ANSI_YELLOW}No match. Take a moment to remember \n\rtheir positions!{ANSI_RESET}\n\r"): return
             if not await safe_write(writer, reader, f"Press any key to continue...{ANSI_RESET}"): return
             
             await reader.read(1) # Wait for input
@@ -410,7 +410,7 @@ async def handle_telnet(reader, writer):
                 )
                 
                 # --- LAUNCH MATCHING GAME ---
-                await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Secondary System Detected... Launching C64 Match Mini-Game!{ANSI_RESET}\n\r")
+                await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Secondary System Detected... \n\rLaunching C64 Match Mini-Game!{ANSI_RESET}\n\r")
                 await asyncio.sleep(2)
                 
                 await run_matching_game(reader, writer)
