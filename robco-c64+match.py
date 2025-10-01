@@ -82,33 +82,40 @@ async def safe_readline(reader, writer):
 
 
 async def safe_read_coords(reader, writer, board_size, message):
-    """Legge e valida le coordinate riga colonna (e.g., '0 1')"""
+    """Legge e valida le coordinate riga colonna (e.g., '0 1') o accetta '.' per uscire."""
     while is_connection_alive(writer, reader):
-        if not await safe_write(writer, reader, f"\n\r{message} \n\r(row col, e.g., 0 1): "): return None
+        # Modified prompt to include quit option
+        if not await safe_write(writer, reader, f"\n\r{message} \n\r(row col, or '.' to exit): "): return None, None
         
         position = await safe_readline(reader, writer)
-        if position is None: return None
+        # Disconnection check
+        if position is None: return None, None
+        
+        # Quit option check
+        if position == '.':
+            return 'QUIT', 'QUIT' # Signal for quitting
         
         try:
             parts = position.split()
             if len(parts) != 2:
-                if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid input. Enter two numbers separated by a space.{ANSI_RESET}\n\r"): return None
+                if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid input. Enter two numbers separated by a space.{ANSI_RESET}\n\r"): return None, None
                 continue
                 
             row, col = map(int, parts)
             if 0 <= row < board_size and 0 <= col < board_size:
                 return row, col
             else:
-                if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid coordinates! Use 0-{board_size-1}.{ANSI_RESET}\n\r"): return None
+                if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid coordinates! Use 0-{board_size-1}.{ANSI_RESET}\n\r"): None, None
         except ValueError:
-            if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid input. Enter two numbers separated by a space.{ANSI_RESET}\n\r"): return None
-    return None
+            if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid input. Enter two numbers separated by a space.{ANSI_RESET}\n\r"): return None, None
+    return None, None
+
 
 # --- Game Utilities (Terminal Hacking) ---
-# ... (Keep get_robco_splash, get_likeness, generate_junk_string, generate_game_screen unchanged) ...
 
 def get_robco_splash():
     """Restituisce il splash screen con logo RobCo compatto."""
+    # FIX: Ensure all parentheses are closed for multi-line string
     return (
         f"\r\n"
         f"{ANSI_RESET}{ANSI_CYAN}{ANSI_BOLD}"
@@ -117,14 +124,14 @@ def get_robco_splash():
         f"\r\n######| ##|--##|######| ##|   ##|--##|"
         f"\r\n##|--##|##|  ##|##|--##|##|   ##|  ##|"
         f"\r\n##|  ##| #####| ######|  #####|#####|" 
-        F"\r\n--   --  -----  ------   ----- -----"
+        f"\r\n--   --  -----  ------   ----- -----"
         f"{ANSI_RESET}"
         f"\r\n{ANSI_YELLOW}"
         f"\r\n      Industries Terminal Systems"
         f"{ANSI_RESET}"
         f"\r\n"
-        f"\r\n{ANSI_WHITE}{ANSI_BOLD}     TERMINAL HACKING SYSTEM v2.1.7"
-        f"\r\n     Copyright 2287 RobCo Industries"
+        f"\r\n{ANSI_WHITE}{ANSI_BOLD}      TERMINAL HACKING SYSTEM v2.1.7"
+        f"\r\n      Copyright 2287 RobCo Industries"
         f"{ANSI_RESET}"
         f"\r\n"
         f"\r\n{ANSI_GREEN}        * AUTHORIZED ACCESS ONLY *"
@@ -159,7 +166,7 @@ def generate_game_screen(words, junk_fill_ratio=0.5):
     num_junk_strings = int(len(words) / (1 - junk_fill_ratio) - len(words))
     for _ in range(num_junk_strings):
         # Junk length matches word length (7)
-        all_content.append(generate_junk_string(7)) 
+        all_content.append(generate_junk_string(7))  
 
     random.shuffle(all_content)
 
@@ -195,22 +202,36 @@ def create_board_c64(size=4):
         grid.append(row)
     return grid
 
+# *** MODIFIED FUNCTION START ***
 async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_made, message=""):
-    """Disegna la board C64 con formato row/col e XX per i non rivelati."""
+    """
+    Disegna la board C64 con formato row/col, XX per i non rivelati,
+    e aggiunge un indirizzo esadecimale all'inizio di ogni riga.
+    """
     board_size = len(board)
+    # Using a fixed starting address for aesthetic consistency
+    start_address = 0x1000 
+    address_increment = 0x08 # Increment by 8 bytes per row (simulating 4 cells * 2 bytes each)
+    
     if not await safe_write(writer, reader, '\x1b[2J\x1b[H'): return False
     
     # Title and Moves
     if not await safe_write(writer, reader, f"{ANSI_GREEN}{ANSI_BOLD}** ROBCO MATCHING PUZZLE (LEVEL 2) **{ANSI_RESET}\n\r"): return False
     if not await safe_write(writer, reader, f"{ANSI_WHITE}Moves made: {moves_made}{ANSI_RESET}\n\r\n\r"): return False
     
-    # Print column headers
-    col_headers = "  " + " ".join(f"{i:2}" for i in range(board_size))
+    # Print column headers (Adjusted to account for the address and row number offset)
+    col_headers_prefix = "        " # 8 spaces for "0xXXXX " + "0 " 
+    col_headers = col_headers_prefix + " ".join(f"{i:2}" for i in range(board_size))
     if not await safe_write(writer, reader, col_headers + "\n\r"): return False
     
     # Print rows
     for i, row in enumerate(board):
-        line = f"{i} "
+        # Generate the hexadecimal address for the row
+        address = f"0x{start_address + i * address_increment:04X}"
+        
+        # Start the line with the address and the row index
+        line = f"{address} {i} " 
+        
         for j, cell in enumerate(row):
             if revealed_status[i][j]:
                 # Matched or revealed this turn
@@ -222,16 +243,18 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
         if not await safe_write(writer, reader, line + "\n\r"): return False
     
     # Separator
-    separator = "-" * (board_size * 3 + 2)
+    # Adjusted separator length for the address column
+    separator = "-" * (board_size * 3 + 12)
     if not await safe_write(writer, reader, separator + "\n\r"): return False
 
     # Status message
     if not await safe_write(writer, reader, f"\n\r{ANSI_WHITE}Status: {message}{ANSI_RESET}\n\r"): return False
     return True
+# *** MODIFIED FUNCTION END ***
 
 
 async def run_matching_game(reader, writer):
-    """Logica del gioco di abbinamento in stile C64."""
+    """Logica del gioco di abbinamento in stile C64 con opzione di uscita ('.')."""
     
     board_size = 4
     board = create_board_c64(board_size)
@@ -261,7 +284,12 @@ async def run_matching_game(reader, writer):
 
         # 2. Get first guess
         row1, col1 = await safe_read_coords(reader, writer, board_size, "Enter coordinates for the first symbol")
-        if row1 is None: return
+        if row1 is None: return # Disconnection
+        
+        # Check for QUIT signal
+        if row1 == 'QUIT':
+            await safe_write(writer, reader, f"{ANSI_YELLOW}\n\rExiting Level 2.{ANSI_RESET}\n\r")
+            return
         
         if board[row1][col1]['matched']:
             if not await safe_write(writer, reader, f"{ANSI_YELLOW}That's already been matched. Try again.{ANSI_RESET}\n\r"): return
@@ -275,7 +303,13 @@ async def run_matching_game(reader, writer):
 
         # 4. Get second guess
         row2, col2 = await safe_read_coords(reader, writer, board_size, "Enter coordinates for the 2nd symbol")
-        if row2 is None: return
+        if row2 is None: return # Disconnection
+        
+        # Check for QUIT signal
+        if row2 == 'QUIT':
+            revealed_status[row1][col1] = False # Hide the 1st symbol before quitting
+            await safe_write(writer, reader, f"{ANSI_YELLOW}\n\rExiting Level 2.{ANSI_RESET}\n\r")
+            return
         
         # Check if tile was selected twice or is already matched
         if (row1, col1) == (row2, col2) or board[row2][col2]['matched']:
@@ -314,7 +348,7 @@ async def run_matching_game(reader, writer):
         
     if is_connection_alive(writer, reader):
         await safe_write(writer, reader, "\n\rPress any key to finish...")
-        await reader.read(1) 
+        await reader.read(1)  
 
 
 # --- Main Flow (Terminal Hacking) ---
@@ -375,7 +409,8 @@ async def handle_telnet(reader, writer):
                         guessed_word, likeness = guess_history[attempt_index]
                         attempt_display = f"{guessed_word} ({likeness}/{len(password)})"
                 
-                if not await safe_write(writer, reader, f"{line:<32}{attempt_display}\n\r"): break
+                # Using :<25 padding for 80-char terminal display
+                if not await safe_write(writer, reader, f"{line:<25}{attempt_display}\n\r"): break
 
             if not is_connection_alive(writer, reader): break
 
@@ -453,6 +488,7 @@ async def handle_telnet(reader, writer):
             await safe_write(writer, reader, "\n\rThank you for playing. Goodbye!\n\r")
 
     except Exception as e:
+        # This print statement is now definitely on one line.
         print(f"Unexpected error in the session: {e}")
     finally:
         try:
@@ -470,7 +506,7 @@ async def main():
     server = await telnetlib3.create_server(
         port=6023,
         shell=handle_telnet,
-        encoding='utf-8'
+        encoding='utf-8' 
     )
     
     print("Server started! Listening on port 6023")
