@@ -7,7 +7,7 @@ ________________________
 - launch with `python robco-c64-full.py` for C64 safe terminal hacking game three levels
 
 - connect to the game with `telnet (your server ip) 6023`
-- 
+
 - full version requires a chatgpt or gemini or claude API key
 make sure to use the following to set the API key as an environment variable
 ```bash
