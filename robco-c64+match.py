@@ -1,10 +1,12 @@
 #do a "pip install telnetlib3" if telnetlib3 is not installed
 #RobCo BBS server for the RobCo terminal hacking game
 #By Francesco Clementoni aka Arturo Dente
+#Matching Game and C64 conversion by Sid Choudhuri aka m0nde
 
 import asyncio
 import random
 import telnetlib3
+import json
 import sys
 
 # Le "schermate" di parole pronte
@@ -22,7 +24,6 @@ PAROLE_SCHERMATE = [
 ]
 
 CARATTERI_CASUALI = '!@#$%^&*()_+-=[]{}|;:",.<>/?~`'
-MATCHING_SYMBOLS_C64 = ['C=', '64', '8B', 'm0', 'F1', 'F3', 'F5', 'F7'] # 2-char symbols
 
 # ANSI Color codes
 ANSI_GREEN = '\x1b[32m'
@@ -31,6 +32,17 @@ ANSI_CYAN = '\x1b[36m'
 ANSI_WHITE = '\x1b[37m'
 ANSI_BOLD = '\x1b[1m'
 ANSI_RESET = '\x1b[0m'
+
+# --- Symbol Loading ---
+
+def load_symbols(filepath="symbols.json"):
+    """Load symbols from JSON file."""
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    print(f"Loaded {len(data['symbols'])} symbols from {filepath}")
+    return data['symbols']
+
+SYMBOLS = load_symbols()
 
 # --- Connection Utilities (Global) ---
 
@@ -59,7 +71,7 @@ async def safe_readline(reader, writer):
                 char = await reader.read(1)
                 if not char:
                     return None
-                
+
                 if char == '\r' or char == '\n':
                     writer.write('\r\n')
                     await writer.drain()
@@ -73,7 +85,7 @@ async def safe_readline(reader, writer):
                     input_buffer += char
                     writer.write(char)
                     await writer.drain()
-                    
+
     except (OSError, IOError, ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError) as e:
         print(f"Error during reading: {e}")
         return None
@@ -84,19 +96,19 @@ async def safe_read_coords(reader, writer, rows, cols, message):
     """Legge e valida le coordinate riga colonna (e.g., '0 1') o accetta '.' per uscire."""
     while is_connection_alive(writer, reader):
         if not await safe_write(writer, reader, f"\n\r{message} \n\r(row col, or '.' to exit): "): return None, None
-        
+
         position = await safe_readline(reader, writer)
         if position is None: return None, None
-        
+
         if position == '.':
             return 'QUIT', 'QUIT'
-        
+
         try:
             parts = position.split()
             if len(parts) != 2:
                 if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid input. Enter two numbers separated by a space.{ANSI_RESET}\n\r"): return None, None
                 continue
-                
+
             row, col = map(int, parts)
             if 0 <= row < rows and 0 <= col < cols:
                 return row, col
@@ -118,7 +130,7 @@ def get_robco_splash():
         f"\r\n##|--##| #####| ##|     ##|--- #####|"
         f"\r\n######| ##|--##|######| ##|   ##|--##|"
         f"\r\n##|--##|##|  ##|##|--##|##|   ##|  ##|"
-        f"\r\n##|  ##| #####| ######|  #####|#####|" 
+        f"\r\n##|  ##| #####| ######|  #####|#####|"
         f"\r\n--   --  -----  ------   ----- -----"
         f"{ANSI_RESET}"
         f"\r\n{ANSI_YELLOW}"
@@ -156,23 +168,23 @@ def generate_game_screen(words, junk_fill_ratio=0.5):
     Restituisce una lista di stringhe formattate con indirizzo esadecimale.
     """
     all_content = list(words)
-    
+
     num_junk_strings = int(len(words) / (1 - junk_fill_ratio) - len(words))
     for _ in range(num_junk_strings):
-        all_content.append(generate_junk_string(7))  
+        all_content.append(generate_junk_string(7))
 
     random.shuffle(all_content)
 
     screen = []
-    start_address = random.randint(1024, 65535 - (len(all_content) // 2 * 16)) 
-    
+    start_address = random.randint(1024, 65535 - (len(all_content) // 2 * 16))
+
     for i in range(0, len(all_content), 2):
         address = f"{start_address + (i // 2) * 16:04X}"
         line = f"0x{address} {all_content[i]}"
-        
+
         if i + 1 < len(all_content):
             line += f" {all_content[i+1]}"
-            
+
         screen.append(line)
 
     return screen
@@ -181,9 +193,15 @@ def generate_game_screen(words, junk_fill_ratio=0.5):
 # --- Matching Game Utilities (C64 Style) ---
 
 def create_board_c64(rows=3, cols=4):
-    """Crea la board 3x4 con simboli C64 a 2 caratteri."""
+    """Crea la board 3x4 usando simboli caricati dal file JSON."""
     total_tiles = rows * cols  # 12
-    board_symbols = MATCHING_SYMBOLS_C64[:(total_tiles // 2)] * 2  # 6 pairs
+    num_pairs = total_tiles // 2  # 6
+
+    if len(SYMBOLS) < num_pairs:
+        raise ValueError(f"Not enough symbols! Need {num_pairs}, only have {len(SYMBOLS)}")
+
+    chosen = random.sample(SYMBOLS, num_pairs)
+    board_symbols = chosen * 2
     random.shuffle(board_symbols)
 
     grid = []
@@ -197,6 +215,7 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
     """
     Disegna la board con tiles 7 chars wide x 5 lines tall.
     Layout: 6-char address + space + 4 tiles of 7 chars separated by spaces = 38 chars total.
+    Each tile shows 3x3 dot art centered inside [ ] borders.
     """
     rows = len(board)
     cols = len(board[0])
@@ -206,19 +225,14 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
     def tile_top():
         return "[=====]"  # 7 chars
 
-    def tile_mid(symbol, revealed, matched):
+    def tile_art_row(symbol, row_index, revealed, matched):
+        """One of the 3 art rows, padded to fit inside tile borders."""
         if revealed:
             color = ANSI_GREEN if matched else ANSI_YELLOW
-            return f"{color}[ {symbol}  ]{ANSI_RESET}"  # 7 chars
+            art_row = symbol['art'][row_index]  # 3 chars
+            return f"{color}[ {art_row} ]{ANSI_RESET}"  # 7 chars total
         else:
-            return "[ ??  ]"
-
-    def tile_blank(revealed, matched):
-        if revealed:
-            color = ANSI_GREEN if matched else ANSI_YELLOW
-            return f"{color}[     ]{ANSI_RESET}"  # 7 chars
-        else:
-            return "[     ]"
+            return "[  ?  ]"
 
     def tile_bot():
         return "[=====]"  # 7 chars
@@ -233,9 +247,9 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
         blank  = "       "       # 7 spaces to align remaining lines
 
         line_top  = prefix
-        line_mid1 = blank
-        line_mid2 = blank
-        line_mid3 = blank
+        line_art0 = blank
+        line_art1 = blank
+        line_art2 = blank
         line_bot  = blank
 
         for j, cell in enumerate(row):
@@ -244,12 +258,12 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
             sep = " " if j < cols - 1 else ""
 
             line_top  += tile_top() + sep
-            line_mid1 += tile_mid(cell['symbol'], rev, mat) + sep
-            line_mid2 += tile_blank(rev, mat) + sep
-            line_mid3 += tile_mid(cell['symbol'], rev, mat) + sep
+            line_art0 += tile_art_row(cell['symbol'], 0, rev, mat) + sep
+            line_art1 += tile_art_row(cell['symbol'], 1, rev, mat) + sep
+            line_art2 += tile_art_row(cell['symbol'], 2, rev, mat) + sep
             line_bot  += tile_bot() + sep
 
-        for line in [line_top, line_mid1, line_mid2, line_mid3, line_bot]:
+        for line in [line_top, line_art0, line_art1, line_art2, line_bot]:
             if not await safe_write(writer, reader, line + "\n\r"): return False
 
     separator = "-" * 38
@@ -260,7 +274,7 @@ async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_
 
 async def run_matching_game(reader, writer):
     """Logica del gioco di abbinamento in stile C64 con opzione di uscita ('.')."""
-    
+
     rows = 3
     cols = 4
     board = create_board_c64(rows=rows, cols=cols)
@@ -268,38 +282,32 @@ async def run_matching_game(reader, writer):
     matched_pairs = 0
     total_pairs = 6
     moves_made = 0
-    
-    # --- Start Setup: Display Symbols before game starts ---
-    all_symbols = set()
-    for row in board:
-        for cell in row:
-            all_symbols.add(cell['symbol'])
 
-    if not await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Symbols to match:\n\r {ANSI_RESET}"): return
-    if not await safe_write(writer, reader, " ".join(sorted(list(all_symbols))) + "\n\r"): return
+    # --- Start Setup ---
+    if not await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Symbol pool: {len(SYMBOLS)} symbols available\n\r{ANSI_RESET}"): return
     if not await safe_write(writer, reader, "-" * 30 + "\n\r"): return
     if not await safe_write(writer, reader, f"Press any key to start the game and \n\rhide the symbols...{ANSI_RESET}"): return
-    
+
     await reader.read(1)
 
     while matched_pairs < total_pairs and is_connection_alive(writer, reader):
-        
+
         # 1. Display current state
         if not await draw_matching_board_c64(writer, reader, board, revealed_status, moves_made, "Waiting for first selection..."): return
 
         # 2. Get first guess
         row1, col1 = await safe_read_coords(reader, writer, rows, cols, "Enter coordinates for the first symbol")
         if row1 is None: return
-        
+
         if row1 == 'QUIT':
             await safe_write(writer, reader, f"{ANSI_YELLOW}\n\rExiting Level 2.{ANSI_RESET}\n\r")
             return
-        
+
         if board[row1][col1]['matched']:
             if not await safe_write(writer, reader, f"{ANSI_YELLOW}Already matched. Try again.{ANSI_RESET}\n\r"): return
             await asyncio.sleep(1)
             continue
-        
+
         revealed_status[row1][col1] = True
 
         # 3. Display board with 1st selection revealed
@@ -308,18 +316,18 @@ async def run_matching_game(reader, writer):
         # 4. Get second guess
         row2, col2 = await safe_read_coords(reader, writer, rows, cols, "Enter coordinates for the 2nd symbol")
         if row2 is None: return
-        
+
         if row2 == 'QUIT':
             revealed_status[row1][col1] = False
             await safe_write(writer, reader, f"{ANSI_YELLOW}\n\rExiting Level 2.{ANSI_RESET}\n\r")
             return
-        
+
         if (row1, col1) == (row2, col2) or board[row2][col2]['matched']:
             if not await safe_write(writer, reader, f"{ANSI_YELLOW}Invalid selection (already matched or same tile). Try again.{ANSI_RESET}\n\r"): return
             revealed_status[row1][col1] = False
             await asyncio.sleep(1)
             continue
-        
+
         revealed_status[row2][col2] = True
         moves_made += 1
 
@@ -328,7 +336,7 @@ async def run_matching_game(reader, writer):
         await asyncio.sleep(1)
 
         # 6. Check for match
-        if board[row1][col1]['symbol'] == board[row2][col2]['symbol']:
+        if board[row1][col1]['symbol']['id'] == board[row2][col2]['symbol']['id']:
             if not await safe_write(writer, reader, f"{ANSI_GREEN}It's a match!{ANSI_RESET}\n\r"): return
             board[row1][col1]['matched'] = True
             board[row2][col2]['matched'] = True
@@ -345,7 +353,7 @@ async def run_matching_game(reader, writer):
     if matched_pairs == total_pairs and is_connection_alive(writer, reader):
         if not await draw_matching_board_c64(writer, reader, board, revealed_status, moves_made, f"{ANSI_GREEN}{ANSI_BOLD}SUCCESS! ALL PAIRS FOUND!{ANSI_RESET}"): return
         if not await safe_write(writer, reader, f"\n\r{ANSI_CYAN}** MASTER TERMINAL ACCESS GRANTED in {moves_made} moves! **{ANSI_RESET}\n\r"): return
-        
+
     if is_connection_alive(writer, reader):
         await safe_write(writer, reader, "\n\rPress any key to finish...")
         await reader.read(1)
@@ -355,9 +363,9 @@ async def run_matching_game(reader, writer):
 
 async def show_splash_screen(reader, writer):
     """Mostra lo splash screen e aspetta input dell'utente."""
-    
+
     if not await safe_write(writer, reader, '\x1b[2J\x1b[H'): return False
-    
+
     splash = get_robco_splash()
     if not await safe_write(writer, reader, splash): return False
 
@@ -368,15 +376,15 @@ async def show_splash_screen(reader, writer):
                 return True
         except (OSError, IOError, ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
             return False
-            
+
     return False
-    
+
 async def handle_telnet(reader, writer):
     """Logica di gioco del server con gestione migliorata delle disconnessioni."""
-    
+
     if not await show_splash_screen(reader, writer):
         return
-    
+
     chosen_screen_words = random.choice(PAROLE_SCHERMATE)
     password = random.choice(chosen_screen_words)
     total_attempts = 4
@@ -387,26 +395,26 @@ async def handle_telnet(reader, writer):
 
     try:
         print(f"New connection established. Password: {password}")
-        
+
         while attempts_made < total_attempts and is_connection_alive(writer, reader):
-            
+
             if not await safe_write(writer, reader, '\x1b[2J\x1b[H'): break
-            
+
             if not await safe_write(writer, reader,
                 "RobCo industries (tm) termlink protocol \n\r "
                 "Enter password now.\n\r\n\r"
             ): break
-            
+
             for i, line in enumerate(screen_lines):
                 if not is_connection_alive(writer, reader): break
-                    
+
                 attempt_display = ""
                 if i >= num_lines - total_attempts:
                     attempt_index = i - (num_lines - total_attempts)
                     if attempt_index < len(guess_history):
                         guessed_word, likeness = guess_history[attempt_index]
                         attempt_display = f"{guessed_word} ({likeness}/{len(password)})"
-                
+
                 if not await safe_write(writer, reader, f"{line:<25}{attempt_display}\n\r"): break
 
             if not is_connection_alive(writer, reader): break
@@ -417,7 +425,7 @@ async def handle_telnet(reader, writer):
             ): break
 
             guess = await safe_readline(reader, writer)
-            
+
             if guess is None: break
             if not guess: continue
 
@@ -439,15 +447,15 @@ async def handle_telnet(reader, writer):
                     f"*{password_message.center(max_len-2)}*\n\r"
                     f"{border}\n\r"
                 )
-                
+
                 # --- LAUNCH MATCHING GAME ---
                 await safe_write(writer, reader, f"\n\r{ANSI_CYAN}Secondary System Detected... \n\rLaunching C64 Match Mini-Game!{ANSI_RESET}\n\r")
                 await asyncio.sleep(2)
-                
+
                 await run_matching_game(reader, writer)
-                
+
                 break
-                
+
             elif guess in chosen_screen_words:
                 likeness = get_likeness(guess, password)
                 if not await safe_write(writer, reader,
@@ -459,7 +467,7 @@ async def handle_telnet(reader, writer):
             else:
                 if not await safe_write(writer, reader, f"\n\rPassword not recognized. Not in the list.{ANSI_RESET}\n\r"): break
                 attempts_made += 1
-                
+
             if is_connection_alive(writer, reader):
                 await asyncio.sleep(2)
 
@@ -478,7 +486,7 @@ async def handle_telnet(reader, writer):
                 f"*{fail_message_2.center(max_len-2)}*\n\r"
                 f"{border}\n\r"
             )
-            
+
         if is_connection_alive(writer, reader):
             await safe_write(writer, reader, "\n\rThank you for playing. Goodbye!\n\r")
 
@@ -490,22 +498,23 @@ async def handle_telnet(reader, writer):
                 writer.close()
         except Exception as e:
             print(f"Error during writer closing: {e}")
-            
+
         print("Session ended.")
 
 async def main():
     """Avvia il server telnet e lo mantiene in esecuzione."""
     print("Starting RobCo Terminal server on port 6023...")
-    
+    print(f"Symbol pool: {len(SYMBOLS)} symbols available")
+
     server = await telnetlib3.create_server(
         port=6023,
         shell=handle_telnet,
-        encoding='utf-8' 
+        encoding='utf-8'
     )
-    
+
     print("Server started! Listening on port 6023")
     print("Press Ctrl+C to stop the server")
-    
+
     try:
         await server.serve_forever()
     except asyncio.CancelledError:
