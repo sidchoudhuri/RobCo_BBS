@@ -204,53 +204,66 @@ def create_board_c64(size=4):
 
 # *** MODIFIED FUNCTION START ***
 async def draw_matching_board_c64(writer, reader, board, revealed_status, moves_made, message=""):
-    """
-    Disegna la board C64 con formato row/col, XX per i non rivelati,
-    e aggiunge un indirizzo esadecimale all'inizio di ogni riga.
-    """
     board_size = len(board)
-    # Using a fixed starting address for aesthetic consistency
-    start_address = 0x1000 
-    address_increment = 0x08 # Increment by 8 bytes per row (simulating 4 cells * 2 bytes each)
-    
-    if not await safe_write(writer, reader, '\x1b[2J\x1b[H'): return False
-    
-    # Title and Moves
-    if not await safe_write(writer, reader, f"{ANSI_GREEN}{ANSI_BOLD}** ROBCO MATCHING PUZZLE (LEVEL 2) **{ANSI_RESET}\n\r"): return False
-    if not await safe_write(writer, reader, f"{ANSI_WHITE}Moves made: {moves_made}{ANSI_RESET}\n\r\n\r"): return False
-    
-    # Print column headers (Adjusted to account for the address and row number offset)
-    col_headers_prefix = "        " # 8 spaces for "0xXXXX " + "0 " 
-    col_headers = col_headers_prefix + " ".join(f"{i:2}" for i in range(board_size))
-    if not await safe_write(writer, reader, col_headers + "\n\r"): return False
-    
-    # Print rows
-    for i, row in enumerate(board):
-        # Generate the hexadecimal address for the row
-        address = f"0x{start_address + i * address_increment:04X}"
-        
-        # Start the line with the address and the row index
-        line = f"{address} {i} " 
-        
-        for j, cell in enumerate(row):
-            if revealed_status[i][j]:
-                # Matched or revealed this turn
-                color = ANSI_GREEN if cell['matched'] else ANSI_YELLOW
-                line += f"{color}{cell['symbol']}{ANSI_RESET} "
-            else:
-                # Hidden
-                line += f"XX "
-        if not await safe_write(writer, reader, line + "\n\r"): return False
-    
-    # Separator
-    # Adjusted separator length for the address column
-    separator = "-" * (board_size * 3 + 12)
-    if not await safe_write(writer, reader, separator + "\n\r"): return False
+    start_address = 0x1000
+    address_increment = 0x10
+    TILE_W = 7  # includes borders, e.g. [=XXX=] — must stay <=7 so row fits in 39
 
-    # Status message
-    if not await safe_write(writer, reader, f"\n\r{ANSI_WHITE}Status: {message}{ANSI_RESET}\n\r"): return False
+    def tile_top():
+        return "[=====]"
+
+    def tile_mid(symbol, revealed, matched):
+        if revealed:
+            color = ANSI_GREEN if matched else ANSI_YELLOW
+            # Symbol is 2 chars, pad to 3 inside: e.g. [= C= =]
+            inner = f" {symbol}  "   # 4 chars inside
+            return f"{color}[={inner}=]{ANSI_RESET}"
+        else:
+            return "[= ?? =]"
+
+    def tile_blank(revealed, matched):
+        if revealed:
+            color = ANSI_GREEN if matched else ANSI_YELLOW
+            return f"{color}[=    =]{ANSI_RESET}"
+        else:
+            return "[=    =]"
+
+    def tile_bot():
+        return "[=====]"
+
+    if not await safe_write(writer, reader, '\x1b[2J\x1b[H'): return False
+    if not await safe_write(writer, reader, f"{ANSI_GREEN}{ANSI_BOLD}** ROBCO MATCHING PUZZLE **{ANSI_RESET}\n\r"): return False
+    if not await safe_write(writer, reader, f"{ANSI_WHITE}Moves: {moves_made}{ANSI_RESET}\n\r\n\r"): return False
+
+    for i, row in enumerate(board):
+        address = f"0x{start_address + i * address_increment:04X}"
+        prefix_top    = f"{address} "   # 7 chars: "0xXXXX "
+        prefix_blank  = "        "      # 8 spaces to align under tiles
+
+        # Build each of the 4 tile lines for this board row
+        line_top   = prefix_top
+        line_mid1  = prefix_blank
+        line_mid2  = prefix_blank
+        line_bot   = prefix_blank
+
+        for j, cell in enumerate(row):
+            rev = revealed_status[i][j]
+            mat = cell['matched']
+            sep = " " if j < board_size - 1 else ""
+
+            line_top  += tile_top() + sep
+            line_mid1 += tile_mid(cell['symbol'], rev, mat) + sep
+            line_mid2 += tile_blank(rev, mat) + sep
+            line_bot  += tile_bot() + sep
+
+        for line in [line_top, line_mid1, line_mid2, line_bot]:
+            if not await safe_write(writer, reader, line + "\n\r"): return False
+
+    separator = "-" * 39
+    if not await safe_write(writer, reader, separator + "\n\r"): return False
+    if not await safe_write(writer, reader, f"{ANSI_WHITE}{message}{ANSI_RESET}\n\r"): return False
     return True
-# *** MODIFIED FUNCTION END ***
+    # *** MODIFIED FUNCTION END ***
 
 
 async def run_matching_game(reader, writer):
